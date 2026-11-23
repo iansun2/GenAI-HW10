@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiDAR 3D 偵測入門</title>
+<meta name="description" content="從點雲到 3D 框：LiDAR 3D 物件偵測的教學簡報，以 voxel-based 方法（SECOND → Voxel R-CNN → CasA → NV3D）為主線，並介紹 VoxelNeXt、LION 等新趨勢。">
+<style>
+:root{
+  --bg:#f6f5f2; --stage:#ffffff; --fg:#1d1f23; --muted:#5d636e; --line:#e2e0da; --card:#f3f2ee;
+  --accent:#2f6fde; --accent-soft:#e6eefc; --accent2:#d9822b; --accent2-soft:#fbeedf;
+  --good:#2e8b57; --good-soft:#e3f3ea; --warn:#c0392b; --warn-soft:#fbe7e4;
+  --shadow:0 10px 40px rgba(20,20,30,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121317; --stage:#1a1c21; --fg:#e9eaee; --muted:#9aa0ab; --line:#2c2f36; --card:#22252b;
+    --accent:#6c9cff; --accent-soft:#1f2a44; --accent2:#f0a35a; --accent2-soft:#3a2b1c;
+    --good:#5cc08a; --good-soft:#1b3326; --warn:#ff7b6b; --warn-soft:#3d201d;
+    --shadow:0 10px 40px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121317; --stage:#1a1c21; --fg:#e9eaee; --muted:#9aa0ab; --line:#2c2f36; --card:#22252b;
+  --accent:#6c9cff; --accent-soft:#1f2a44; --accent2:#f0a35a; --accent2-soft:#3a2b1c;
+  --good:#5cc08a; --good-soft:#1b3326; --warn:#ff7b6b; --warn-soft:#3d201d;
+  --shadow:0 10px 40px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,-apple-system,"Segoe UI",sans-serif;}
+body{overflow:hidden}
+.viewport{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+.stage{width:1280px;height:720px;position:relative;transform-origin:center center;flex:none}
+.slide{position:absolute;inset:0;background:var(--stage);border-radius:18px;box-shadow:var(--shadow);
+  padding:56px 72px 64px;display:none;flex-direction:column;overflow:hidden}
+.slide.active{display:flex;animation:fade .35s ease}
+@keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+h1{font-size:54px;line-height:1.15;margin:0 0 18px;letter-spacing:.5px}
+h2{font-size:36px;margin:0 0 6px;letter-spacing:.3px}
+h3{font-size:22px;margin:0 0 10px}
+.kicker{font-size:15px;font-weight:700;letter-spacing:2px;color:var(--accent);margin-bottom:10px}
+.lead{font-size:21px;color:var(--muted);margin:0 0 26px;line-height:1.55}
+p,li{font-size:20px;line-height:1.6}
+ul{margin:0;padding-left:1.2em}
+li{margin:6px 0}
+b,strong{color:var(--fg)}
+.em{color:var(--accent);font-weight:700}
+.em2{color:var(--accent2);font-weight:700}
+.muted{color:var(--muted)}
+.body{flex:1;min-height:0}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:32px;height:100%}
+.cols.c3{grid-template-columns:repeat(3,1fr);gap:22px}
+.cols.wide-left{grid-template-columns:1.25fr 1fr}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+.card h3{display:flex;align-items:center;gap:10px}
+.card p,.card li{font-size:18px}
+.tag{display:inline-block;font-size:13px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);letter-spacing:.5px}
+.tag.o{background:var(--accent2-soft);color:var(--accent2)}
+.tag.g{background:var(--good-soft);color:var(--good)}
+.tag.w{background:var(--warn-soft);color:var(--warn)}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat .n{font-size:46px;font-weight:800;color:var(--accent);line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .n.o{color:var(--accent2)}
+.stat .n.w{color:var(--warn)}
+.stat .n.g{color:var(--good)}
+.stat .l{font-size:16px;color:var(--muted)}
+.stats{display:flex;gap:34px;flex-wrap:wrap}
+.callout{border-left:5px solid var(--accent);background:var(--accent-soft);padding:14px 18px;border-radius:8px;font-size:19px;line-height:1.55}
+.callout.w{border-color:var(--warn);background:var(--warn-soft)}
+.callout.o{border-color:var(--accent2);background:var(--accent2-soft)}
+.callout.g{border-color:var(--good);background:var(--good-soft)}
+.src{position:absolute;left:72px;right:200px;bottom:22px;font-size:13px;color:var(--muted);margin:0;line-height:1.4}
+.pager{position:absolute;right:28px;bottom:20px;font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}
+/* flow diagram */
+.flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.flow .box{border:2px solid var(--line);background:var(--stage);border-radius:10px;padding:10px 14px;font-size:17px;font-weight:600;white-space:nowrap}
+.flow .box.hl{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.flow .box.hl2{border-color:var(--accent2);background:var(--accent2-soft);color:var(--accent2)}
+.flow .arr{color:var(--muted);font-size:20px}
+/* bars */
+.bars{display:flex;flex-direction:column;gap:9px}
+.bar{display:grid;grid-template-columns:170px 1fr 96px;align-items:center;gap:12px;font-size:16px}
+.bar .t{display:block;height:22px;background:var(--line);border-radius:6px;overflow:hidden}
+.bar .f{display:block;height:100%;background:var(--accent);border-radius:6px;transition:width .5s ease}
+.bars.big{gap:22px}.bars.big .bar{font-size:19px;grid-template-columns:150px 1fr 110px}.bars.big .bar .t{height:40px}
+.bar.hl .f{background:var(--accent2)}
+.bar.dim .f{background:var(--muted);opacity:.55}
+.bar .v{font-variant-numeric:tabular-nums;font-weight:700;text-align:right}
+.bar .k{text-align:right;color:var(--fg)}
+/* timeline */
+.tl{display:grid;grid-template-columns:repeat(6,1fr);gap:0;position:relative;margin-top:14px}
+.tl:before{content:"";position:absolute;left:0;right:0;top:27px;height:3px;background:var(--line)}
+.tl .ev{position:relative;padding:0 8px;text-align:center}
+.tl .dot{width:18px;height:18px;border-radius:50%;background:var(--accent);margin:18px auto 12px;border:4px solid var(--stage);box-shadow:0 0 0 2px var(--accent)}
+.tl .ev.o .dot{background:var(--accent2);box-shadow:0 0 0 2px var(--accent2)}
+.tl .y{font-size:14px;color:var(--muted);font-weight:700}
+.tl .nm{font-size:19px;font-weight:800;margin:2px 0}
+.tl .ds{font-size:15px;color:var(--muted);line-height:1.45}
+/* buttons */
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+button.chip{font:inherit;font-size:15px;padding:7px 14px;border-radius:999px;border:1.5px solid var(--line);background:var(--stage);color:var(--fg);cursor:pointer}
+button.chip[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700}
+button.chip:focus-visible,.navbtn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+table.t{border-collapse:collapse;width:100%;font-size:17px}
+table.t th,table.t td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;font-variant-numeric:tabular-nums}
+table.t th{color:var(--muted);font-weight:600;font-size:15px}
+table.t td.num{text-align:right}
+table.t tr.hl td{background:var(--accent-soft);font-weight:700}
+table.t tr.hl2 td{background:var(--accent2-soft);font-weight:700}
+.big-q{font-size:30px;font-weight:800;line-height:1.4}
+/* nav */
+.nav{position:fixed;right:14px;top:12px;display:flex;gap:8px;align-items:center;z-index:5;opacity:.25;transition:opacity .2s}
+.nav:hover,.nav:focus-within{opacity:1}
+.navbtn{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--stage);color:var(--fg);border-radius:999px;padding:6px 14px;cursor:pointer}
+.progress{position:fixed;left:0;top:0;height:4px;background:var(--accent);transition:width .3s;z-index:6}
+canvas{display:block;width:100%;border-radius:10px;background:var(--card);border:1px solid var(--line)}
+.legend{display:flex;gap:16px;font-size:14px;color:var(--muted);margin-top:6px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+@media (max-width:700px){ .nav{opacity:1} }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="viewport"><div class="stage" id="stage">
+
+<!-- 1 -->
+<section class="slide" data-title="封面">
+  <div class="body" style="display:flex;flex-direction:column;justify-content:center">
+    <div class="kicker">LiDAR 3D Object Detection · 教學簡報</div>
+    <h1>從點雲到 3D 框<br><span class="em">LiDAR 3D 物件偵測入門</span></h1>
+    <p class="lead">給「懂一點深度學習、但沒碰過點雲」的你。<br>主線：SECOND → PV-RCNN → Voxel R-CNN → CasA → NV3D；新趨勢：VoxelNeXt、LION。</p>
+    <div class="flow" style="margin-top:10px">
+      <span class="box">點雲</span><span class="arr">→</span>
+      <span class="box">表示法</span><span class="arr">→</span>
+      <span class="box">Backbone</span><span class="arr">→</span>
+      <span class="box">偵測頭</span><span class="arr">→</span>
+      <span class="box hl">3D 框</span>
+    </div>
+  </div>
+  <p class="src">知識來源：本專案 LLM Wiki（wiki/），每個數字都可追溯到 slides/facts.md 與原論文表格。按 ← → 或空白鍵翻頁。</p>
+</section>
+
+<!-- 2 -->
+<section class="slide" data-title="為什麼需要 LiDAR">
+  <div class="kicker">動機</div>
+  <h2>為什麼自駕車需要 LiDAR？</h2>
+  <p class="lead">相機很便宜，但「看不出距離」。</p>
+  <div class="body cols">
+    <div class="card" style="display:flex;flex-direction:column;justify-content:center;gap:22px">
+      <div class="stats">
+        <div class="stat"><span class="n">≈ 90%</span><span class="l">影像方法：2D 車輛偵測 AP</span></div>
+        <div class="stat"><span class="n w">≈ 15%</span><span class="l">影像方法：<b>3D</b> 車輛偵測 AP</span></div>
+      </div>
+      <p class="muted" style="margin:0">同樣的影像，在 2D 上找得到車，一旦要在 3D 中標出位置就幾乎失敗（當時的 KITTI 排行榜）。</p>
+    </div>
+    <div>
+      <h3>LiDAR（光達）是什麼？</h3>
+      <ul>
+        <li>旋轉的雷射測距儀：量光反射回來的時間 → 算出距離</li>
+        <li>一次掃描得到大量 3D 點：<b>(x, y, z) + 反射強度</b></li>
+        <li>這堆點就叫<span class="em">點雲（point cloud）</span></li>
+        <li>直接帶有<b>精確距離</b>，正是 3D 偵測最需要的</li>
+      </ul>
+      <div class="callout" style="margin-top:18px"><b>3D 物件偵測</b>：在點雲中找出每台車、每個行人，並用一個 <b>3D 框</b>標出位置、大小、朝向。</div>
+    </div>
+  </div>
+  <p class="src">出處：SECOND §1（引用 KITTI 排行榜）→ wiki/concepts/point-cloud-and-lidar.md · 事實 F01</p>
+</section>
+
+<!-- 3 -->
+<section class="slide" data-title="點雲的特性">
+  <div class="kicker">基礎 1</div>
+  <h2>點雲不是「3D 影像」：三個難搞的特性</h2>
+  <p class="lead">想像用很多顆小珠子描出世界的輪廓——近處很密、遠處很稀、中間大部分是空的。</p>
+  <div class="body cols c3">
+    <div class="card"><h3><span class="tag">無序</span></h3>
+      <p>點的排列順序沒有意義，不能像影像一樣直接套 CNN。</p></div>
+    <div class="card"><h3><span class="tag o">稀疏</span></h3>
+      <div class="stat"><span class="n o">0.005</span><span class="l">KITTI 切成 voxel 後「非空格子」的比例</span></div>
+      <p style="margin-top:10px">一個場景只有約 5k–8k 個非空 voxel。在空的地方計算 = 浪費。</p></div>
+    <div class="card"><h3><span class="tag w">密度不均</span></h3>
+      <div class="stat"><span class="n w">&lt; 10 點</span><span class="l">遠方車輛常常只剩這麼少 → 容易漏偵測</span></div>
+      <p style="margin-top:10px">另外：KITTI 只標註前鏡頭看得到的範圍，只用到約 <b>10%</b> 的點雲。</p></div>
+  </div>
+  <p class="src">出處：SECOND §3.1.3、§4.3.1；PointPillars §6 → wiki/concepts/point-cloud-and-lidar.md、sparse-convolution.md · 事實 F02–F04</p>
+</section>
+
+<!-- 4 -->
+<section class="slide" data-title="三種表示法（互動）">
+  <div class="kicker">基礎 2 · 互動</div>
+  <h2>怎麼把點雲變成網路吃得下的東西？</h2>
+  <div class="body cols wide-left" style="margin-top:14px">
+    <div>
+      <canvas id="voxCanvas" width="640" height="400" aria-label="點雲切格子示意圖"></canvas>
+      <div style="display:flex;gap:16px;align-items:center;margin-top:10px">
+        <label for="voxSize" style="font-size:16px;white-space:nowrap">格子大小</label>
+        <input type="range" id="voxSize" min="4" max="40" value="12">
+        <span id="voxReadout" style="font-size:16px;white-space:nowrap;font-variant-numeric:tabular-nums"></span>
+      </div>
+      <div class="legend"><span><span class="sw" style="background:var(--accent)"></span>非空格子</span><span><span class="sw" style="background:var(--accent2)"></span>車輛點</span><span>示意用合成點雲，非論文數據</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card"><h3><span class="tag">Point</span> 直接處理點</h3><p style="margin:0">最精確，但點多時找鄰居很慢（PointNet 系列）。</p></div>
+      <div class="card"><h3><span class="tag o">Voxel</span> 3D 小方塊</h3><p style="margin:0">SECOND：0.4 × 0.2 × 0.2 m。規則網格 → 可以做卷積。</p></div>
+      <div class="card"><h3><span class="tag g">Pillar</span> 直立柱子</h3><p style="margin:0">PointPillars：地面切 0.16 m 格子、高度不切；約 97% 柱子是空的。</p></div>
+      <p class="muted" style="font-size:16px;margin:0">拖拉滑桿：格子越小 → 細節越多，但格子數暴增、而且幾乎都是空的。</p>
+    </div>
+  </div>
+  <p class="src">出處：SECOND §3.1.1；PointPillars §2.1、§4.2 → wiki/concepts/voxelization.md · 事實 F05–F06（左圖為示意）</p>
+</section>
+
+<!-- 5 -->
+<section class="slide" data-title="3D 框與 Anchor">
+  <div class="kicker">基礎 3</div>
+  <h2>答案長什麼樣？3D 框與 Anchor</h2>
+  <div class="body cols">
+    <div>
+      <h3>一個 3D 框 = 7 個數字</h3>
+      <div class="flow" style="margin:6px 0 18px">
+        <span class="box hl">x, y, z</span><span class="muted">中心</span>
+        <span class="box hl">w, l, h</span><span class="muted">大小</span>
+        <span class="box hl2">θ</span><span class="muted">朝向</span>
+      </div>
+      <h3>Anchor（錨框）＝先擺好的「標準模板」</h3>
+      <ul>
+        <li>在鳥瞰圖每個位置擺一個「一般轎車」：<b>1.6 × 3.9 × 1.56 m</b></li>
+        <li>網路只需回答：這裡有沒有車？模板要怎麼微調？</li>
+        <li>朝向小陷阱：θ 和 θ+π 是<b>同一個框</b>（只差車頭車尾）→ SECOND 用 sin(Δθ) 當 loss，再加方向分類器</li>
+      </ul>
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;justify-content:center;gap:16px">
+      <div class="stat"><span class="n">≈ 70k</span><span class="l">一個 KITTI 場景裡的 anchor 數</span></div>
+      <div class="stat"><span class="n w">4–6 個</span><span class="l">每個真實物體配到的正樣本</span></div>
+      <div class="callout o">前景 / 背景極度不平衡 → 使用 <b>focal loss</b>，讓網路專心學「難的、少的」樣本。</div>
+    </div>
+  </div>
+  <p class="src">出處：SECOND §3.1.5、§3.2.1 → wiki/concepts/anchor-and-box-encoding.md · 事實 F07–F08</p>
+</section>
+
+<!-- 6 -->
+<section class="slide" data-title="怎麼評分：KITTI">
+  <div class="kicker">基礎 4</div>
+  <h2>怎麼評分？KITTI 這張「考卷」</h2>
+  <div class="body cols">
+    <div>
+      <ul>
+        <li>類別：<b>Car、Pedestrian、Cyclist</b></li>
+        <li>難度：Easy / <span class="em">Moderate</span> / Hard（依高度、遮擋、截斷），排行榜看 <b>Moderate</b></li>
+        <li>切分：train <b>3712</b> / val <b>3769</b>；test 標註不公開</li>
+        <li>算對的標準：3D IoU ≥ <b>0.7</b>（Car）、<b>0.5</b>（Ped / Cyc）</li>
+        <li><b>AP</b>：precision–recall 曲線下的面積，0–100，越高越好</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>⚠️ 同一個模型，兩種 AP 算法</h3>
+      <p><b>R11</b>：11 個 recall 取樣點 · <b>R40</b>：40 個</p>
+      <p>KITTI 在 <b>2019-10-08</b> 從 R11 改成 R40 → 早期論文和新論文的數字<b>不能直接比</b>。</p>
+      <div class="callout" style="margin-top:8px">本簡報的規則：<b>只在「同一張表」裡比大小</b>，並標明 val/test、R11/R40。</div>
+    </div>
+  </div>
+  <p class="src">出處：SECOND §4；PV-RCNN §4.2；CasA §IV-A1；Voxel R-CNN §4.3 註腳 → wiki/concepts/kitti-benchmark.md · 事實 F09–F11</p>
+</section>
+
+<!-- 7 -->
+<section class="slide" data-title="路線圖">
+  <div class="kicker">今天的路線</div>
+  <h2>七年的演進，兩條主軸</h2>
+  <p class="lead">先求<span class="em2">快</span>，再求<span class="em">準</span>，最後重新思考「每個零件還需要嗎？」</p>
+  <div class="body">
+    <div class="tl">
+      <div class="ev o"><div class="dot"></div><div class="y">2018</div><div class="nm">SECOND</div><div class="ds">只算有資料的地方</div></div>
+      <div class="ev o"><div class="dot"></div><div class="y">2019</div><div class="nm">PointPillars</div><div class="ds">拿掉高度，全部 2D</div></div>
+      <div class="ev"><div class="dot"></div><div class="y">2020–21</div><div class="nm">PV-RCNN<br>Voxel R-CNN</div><div class="ds">兩階段精修</div></div>
+      <div class="ev"><div class="dot"></div><div class="y">2022</div><div class="nm">CasA</div><div class="ds">多階段精修</div></div>
+      <div class="ev o"><div class="dot"></div><div class="y">2023–24</div><div class="nm">VoxelNeXt<br>LION</div><div class="ds">全 sparse、Mamba backbone</div></div>
+      <div class="ev"><div class="dot"></div><div class="y">2025</div><div class="nm">NV3D</div><div class="ds">改輸入：法向量</div></div>
+    </div>
+    <div class="cols" style="height:auto;margin-top:34px">
+      <div class="callout o"><b>效率路線</b>（橘）：少算空白、少用 dense 運算、擴大到 200 m 也不變慢。</div>
+      <div class="callout"><b>精度路線</b>（藍）：在 3D 特徵上精修候選框，一次、兩次、三次。</div>
+    </div>
+  </div>
+  <p class="src">整理自 wiki/comparisons/speed-vs-accuracy.md（總結：兩條主軸）</p>
+</section>
+
+<!-- 8 -->
+<section class="slide" data-title="SECOND">
+  <div class="kicker">求快 · 2018</div>
+  <h2>SECOND：只在「有人的房間」巡邏</h2>
+  <div class="body cols wide-left">
+    <div>
+      <p><b>比喻</b>：1000 個房間只有 5 間有人。dense 卷積每晚巡完 1000 間；<span class="em">Sparse Convolution</span> 手上有「有人房間清單」，只巡那幾間和鄰居。</p>
+      <ul>
+        <li><b>一般 sparse conv</b>：資料會往外擴散一圈 → 用來下採樣</li>
+        <li><b>Submanifold sparse conv</b>：有資料的位置不變 → 用來抽特徵，保持稀疏</li>
+        <li>結構：Voxel → sparse 3D CNN 壓扁高度 → 2D 鳥瞰圖 → 出框</li>
+        <li>附送兩個沿用至今的技巧：sin 角度 loss、<b>GT-sampling</b>（把別的場景的車「剪貼」進來）</li>
+      </ul>
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;gap:18px;justify-content:center">
+      <div class="stats"><div class="stat"><span class="n o">約 4×</span><span class="l">訓練加速（vs dense）</span></div><div class="stat"><span class="n o">約 3×</span><span class="l">推論加速</span></div></div>
+      <table class="t"><tr><th>KITTI val Car Mod.</th><th>每幀時間</th><th class="num">AP</th></tr>
+        <tr><td>VoxelNet（dense）</td><td>0.23 s</td><td class="num">65.46</td></tr>
+        <tr class="hl"><td>SECOND</td><td>0.05 s</td><td class="num">76.48</td></tr></table>
+    </div>
+  </div>
+  <p class="src">出處：SECOND §1、Table 4 → wiki/papers/second.md、concepts/sparse-convolution.md · 事實 F12–F13</p>
+</section>
+
+<!-- 9 -->
+<section class="slide" data-title="PointPillars">
+  <div class="kicker">求快 · 2019</div>
+  <h2>PointPillars：乾脆把高度拿掉</h2>
+  <div class="body cols">
+    <div>
+      <div class="flow" style="margin-bottom:16px">
+        <span class="box">點雲</span><span class="arr">→</span><span class="box hl2">切成柱子</span><span class="arr">→</span><span class="box">每根柱子壓成一個向量</span><span class="arr">→</span><span class="box hl">偽影像</span><span class="arr">→</span><span class="box">2D CNN</span>
+      </div>
+      <ul>
+        <li>3D 卷積仍是 SECOND 的瓶頸 → 只在地面切格子，高度整根算一格</li>
+        <li>壓成「偽影像」之後，<b>全部只用 2D 卷積</b>，GPU 最擅長</li>
+        <li>val Car Mod.：<b>77.98</b>（和 SECOND 同級）</li>
+      </ul>
+      <div class="callout o" style="margin-top:14px">代價：高度資訊一開始就被壓掉——後面的精度路線都回到 3D voxel。</div>
+    </div>
+    <div class="card">
+      <h3>速度演進（KITTI test 同一張表）</h3>
+      <div class="bars" id="speedBars" style="margin:10px 0 16px"></div>
+      <div class="stats"><div class="stat"><span class="n o">16.2 ms</span><span class="l">每幀總時間</span></div><div class="stat"><span class="n">1.3 ms</span><span class="l">encoder（VoxelNet 要 190 ms）</span></div></div>
+    </div>
+  </div>
+  <p class="src">出處：PointPillars §5、§6、Table 2 → wiki/papers/pointpillars.md · 事實 F14–F16</p>
+</section>
+
+<!-- 10 -->
+<section class="slide" data-title="One-stage vs Two-stage">
+  <div class="kicker">求準 · 核心概念</div>
+  <h2>一階段 vs 兩階段：先寫草稿，再逐題檢查</h2>
+  <div class="body" style="display:flex;flex-direction:column;gap:18px;margin-top:10px">
+    <div class="card">
+      <h3><span class="tag o">One-stage</span> SECOND、PointPillars</h3>
+      <div class="flow"><span class="box">Backbone</span><span class="arr">→</span><span class="box">每個位置直接出框</span><span class="arr">→</span><span class="box">NMS 去重</span></div>
+    </div>
+    <div class="card">
+      <h3><span class="tag">Two-stage</span> PV-RCNN、Voxel R-CNN、CasA</h3>
+      <div class="flow"><span class="box">Backbone</span><span class="arr">→</span><span class="box">RPN 粗圈候選框</span><span class="arr">→</span><span class="box hl">RoI Pooling：每個框取特徵</span><span class="arr">→</span><span class="box hl">精修位置與信心</span></div>
+      <p style="margin:12px 0 0;font-size:17px">RoI Pooling：把每個候選框切成 6×6×6 = <b>216</b> 個格點，逐格收集附近的特徵。難點是 3D 特徵中非空的不到 <b>3%</b>，直接取大多是 0。</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><span class="n">80.87 → 84.83</span><span class="l">PV-RCNN：只有 RPN → 加上第二階段（val R40, Car Mod.）</span></div>
+    </div>
+  </div>
+  <p class="src">出處：PV-RCNN §3.3、Table 7；Voxel R-CNN §3.1 → wiki/concepts/one-stage-vs-two-stage.md、roi-pooling.md · 事實 F17–F19</p>
+</section>
+
+<!-- 11 -->
+<section class="slide" data-title="PV-RCNN vs Voxel R-CNN">
+  <div class="kicker">⭐ 主線 · 2020 → 2021</div>
+  <h2>需要原始點嗎？兩篇相反的答案</h2>
+  <div class="body cols">
+    <div class="card">
+      <h3><span class="tag">PV-RCNN</span>「要，用 point 補精度」</h3>
+      <div class="flow" style="margin-bottom:10px"><span class="box">voxel</span><span class="arr">→</span><span class="box hl2">2048 個 keypoint</span><span class="arr">→</span><span class="box">RoI 格點</span></div>
+      <p style="margin:0">把 voxel、原始點、BEV 特徵先濃縮到 keypoint，再給候選框用。</p>
+      <p style="margin:8px 0 0">各模組耗時：VSA（voxel→keypoint）<b>49.4 ms</b>，約佔一半。</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag g">Voxel R-CNN</span>「不用，voxel 就夠」</h3>
+      <div class="flow" style="margin-bottom:10px"><span class="box">voxel</span><span class="arr">→</span><span class="box hl">直接到 RoI 格點</span></div>
+      <p style="margin:0">先做診斷：只在 2D 鳥瞰圖上精修只 <b>+0.6</b>（78.62 → 79.26）→ 需要 3D；再發現 VSA 是瓶頸 → 拿掉 keypoint。</p>
+    </div>
+  </div>
+  <table class="t" style="margin-top:18px">
+    <tr><th>同一張表</th><th class="num">KITTI val R11 Car Mod.</th><th class="num">FPS</th><th class="num">Waymo 50 m 以上</th></tr>
+    <tr><td>PV-RCNN</td><td class="num">83.69</td><td class="num">8.9</td><td class="num">42.17</td></tr>
+    <tr class="hl"><td>Voxel R-CNN</td><td class="num">84.52</td><td class="num">25.2</td><td class="num">53.15</td></tr>
+  </table>
+  <p class="src">出處：Voxel R-CNN Table 1、2、3、5、6 → wiki/comparisons/pv-rcnn-vs-voxel-rcnn.md · 事實 F20–F24</p>
+</section>
+
+<!-- 12 -->
+<section class="slide" data-title="互動：消融實驗">
+  <div class="kicker">⭐ 主線 · 互動</div>
+  <h2>精度換速度，再把速度拿回來</h2>
+  <p class="lead" style="margin-bottom:14px">Voxel R-CNN 的消融實驗：一步一步加上元件，看 AP 和 FPS 怎麼變。</p>
+  <div class="body cols wide-left">
+    <div>
+      <div class="btns" id="ablBtns" role="group" aria-label="消融步驟"></div>
+      <div style="margin-top:30px" class="bars big" id="ablBars"></div>
+      <table class="t" style="margin-top:28px;font-size:15px" id="ablTable"></table>
+    </div>
+    <div class="card" id="ablNote" style="font-size:18px;line-height:1.6"></div>
+  </div>
+  <p class="src">出處：Voxel R-CNN Table 7（KITTI val R11, Car Mod.）→ wiki/papers/voxel-rcnn.md · 事實 F25</p>
+</section>
+
+<!-- 13 -->
+<section class="slide" data-title="CasA">
+  <div class="kicker">⭐ 主線 · 2022</div>
+  <h2>CasA：精修三次，但 2D 的做法在 3D 不管用</h2>
+  <div class="body cols">
+    <div>
+      <div class="callout w"><b>直接套用 2D 的 cascade</b>：Voxel R-CNN 85.27 → <b>84.82</b>，反而變差。</div>
+      <ul style="margin-top:12px">
+        <li><b>忽略遠處物體</b>：門檻越提越高，能過關的都是點多的近處車</li>
+        <li><b>誤差傳遞</b>：3D 還要估高度和旋轉，小錯一路傳下去</li>
+        <li><b>解法：Cascade Attention</b>——每一階段用 attention 讀取<b>所有前面階段</b>的特徵（第三位檢查員手上有前兩位的筆記），最後三階段投票（boxes voting）</li>
+      </ul>
+      <div class="bars" id="casaBars" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <h3>進步都在「遠處」</h3>
+      <table class="t"><tr><th>距離（val Car Mod.）</th><th class="num">Voxel R-CNN</th><th class="num">CasA+V</th></tr>
+        <tr><td>40–50 m</td><td class="num">45.8</td><td class="num">50.5</td></tr>
+        <tr class="hl"><td>50 m 以上</td><td class="num">7.0</td><td class="num">16.1</td></tr></table>
+      <p style="margin-top:14px">KITTI test Car Mod.：81.62 → <b>83.06</b></p>
+      <p class="muted" style="margin:0">代價：1 階段 64 ms → 3 階段 <b>86 ms</b></p>
+    </div>
+  </div>
+  <p class="src">出處：CasA Table I、IV、VI、VIII、Fig. 5（val 為 R40）→ wiki/papers/casa.md、concepts/cascade-refinement.md · 事實 F26–F30</p>
+</section>
+
+<!-- 14 -->
+<section class="slide" data-title="NV3D">
+  <div class="kicker">⭐ 主線 · 2025（arXiv 預印本）</div>
+  <h2>NV3D：改的不是 head，是輸入</h2>
+  <div class="body cols">
+    <div>
+      <h3>法向量 = 表面朝哪個方向</h3>
+      <ul>
+        <li>對每個 voxel 找 7 個鄰居（KNN），用 PCA 找「最扁」的方向 → 法向量</li>
+        <li>比喻：米粒撒在桌上，散得很開但沒有厚度——沒有厚度的方向就是法向量</li>
+        <li>地面的法向量全部朝上 → 可以拿來<b>找出並丟掉多餘的地面</b></li>
+        <li>約 90% 的 voxel 在 30 m 以內 → 依距離分環，近處多丟、遠處保留</li>
+      </ul>
+      <div class="stats" style="margin-top:10px"><div class="stat"><span class="n o">53.14%</span><span class="l">兩種取樣合計丟掉的 voxel</span></div></div>
+    </div>
+    <div class="card">
+      <h3>同一張表（val R40, Car）</h3>
+      <table class="t"><tr><th></th><th class="num">不取樣 Mod.</th><th class="num">取樣後變化*</th></tr>
+        <tr class="hl"><td>Voxel R-CNN</td><td class="num">85.29</td><td class="num">−1.04</td></tr>
+        <tr><td>NV3D</td><td class="num">84.78</td><td class="num">−1.06</td></tr>
+        <tr class="hl2"><td>SECOND</td><td class="num">—</td><td class="num">+1.18</td></tr></table>
+      <p class="muted" style="font-size:14px;margin:6px 0 0">* 三難度平均的變化</p>
+      <div class="callout o" style="margin-top:10px">最站得住的貢獻：<b>丟掉一半資料，只掉約 1 點</b>，還能外掛到其他模型。<br>但在同一張表裡，NV3D 的 Car 精度沒有超過 Voxel R-CNN；行人取樣後 −18.16。</div>
+    </div>
+  </div>
+  <p class="src">出處：NV3D §3.1、§3.2、Table 1、Table 7 → wiki/papers/nv3d.md、concepts/normal-vector.md、input-sampling.md · 事實 F31–F36</p>
+</section>
+
+<!-- 15 -->
+<section class="slide" data-title="VoxelNeXt">
+  <div class="kicker">新趨勢 · 2023</div>
+  <h2>VoxelNeXt：連偵測頭都 sparse</h2>
+  <div class="body cols">
+    <div>
+      <ul>
+        <li>前面每一篇最後都把特徵<b>轉回完整的 2D 圖</b>才出框——但熱度圖上有反應的位置不到 <b>1%</b></li>
+        <li>VoxelNeXt：不用 anchor、不用 center、不用 RPN、<b>不用 NMS</b>，直接讓「有資料的 voxel」舉手出框</li>
+        <li>出框的 voxel 只有 <b>9.9%</b> 在物體中心附近，<b>72.8%</b> 在邊界 → LiDAR 本來就只打到表面，<b>中心不是必要的</b></li>
+      </ul>
+      <div class="callout w" style="margin-top:12px">FLOPs 只有 CenterPoint 的約 1/5（38.7G vs 186.6G），延遲卻是 66 vs 96 ms——<b>FLOPs ≠ 速度</b>。</div>
+    </div>
+    <div class="card">
+      <h3>偵測範圍越大，差距越明顯</h3>
+      <table class="t"><tr><th>延遲（Argoverse2）</th><th class="num">50 m</th><th class="num">200 m</th></tr>
+        <tr><td>CenterPoint（dense head）</td><td class="num">82 ms</td><td class="num">246 ms</td></tr>
+        <tr class="hl"><td>VoxelNeXt</td><td class="num">61 ms</td><td class="num">66 ms</td></tr></table>
+      <p style="margin-top:14px">nuScenes test：CenterPoint 58.0 mAP / 65.5 NDS → VoxelNeXt <b>64.5 / 70.0</b></p>
+      <p class="muted" style="margin:0">dense 圖的面積隨距離平方成長；sparse 只看有資料的 voxel。</p>
+    </div>
+  </div>
+  <p class="src">出處：VoxelNeXt §1、§5、Table 7、Table 12、Fig. 3 → wiki/papers/voxelnext.md、concepts/anchor-free-and-sparse-head.md · 事實 F37–F41</p>
+</section>
+
+<!-- 16 -->
+<section class="slide" data-title="LION">
+  <div class="kicker">新趨勢 · 2024（arXiv 預印本）</div>
+  <h2>LION：把 Mamba 搬進 3D backbone</h2>
+  <div class="body cols">
+    <div>
+      <table class="t" style="margin-bottom:14px"><tr><th>怎麼讓 voxel 交流</th><th>比喻</th><th>代價</th></tr>
+        <tr><td>Sparse conv</td><td>只和隔壁講話</td><td>看不遠</td></tr>
+        <tr><td>Transformer</td><td>小組會議</td><td>人數的平方</td></tr>
+        <tr class="hl"><td>Linear RNN（LION）</td><td>傳紙條</td><td>人數的線性</td></tr></table>
+      <ul>
+        <li>群組大小 <b>4096</b> / 2048 / 1024 / 512（Transformer 對照組：256）</li>
+        <li>弱點：排成一維序列，<b>上下相鄰的 voxel 會被拉得很遠</b> → 加一層 submanifold conv 補回局部資訊</li>
+        <li>再用自回歸「長出」前景 voxel，補強稀疏</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>消融（Waymo L2 mAPH）</h3>
+      <div class="bars" id="lionBars" style="margin:8px 0 14px"></div>
+      <div class="callout w">FLOPs 58.5G（DSVT-Voxel 100.8G），但<b>沒有報告延遲</b>；作者承認 linear RNN 平行化不如 Transformer，速度仍需改進。</div>
+    </div>
+  </div>
+  <p class="src">出處：LION §3、§4.2、§5、Table 5、Table 12 → wiki/papers/lion.md、concepts/transformer-and-linear-rnn-backbone.md · 事實 F42、F44、F45</p>
+</section>
+
+<!-- 17 -->
+<section class="slide" data-title="互動：同表比較">
+  <div class="kicker">總結 · 互動</div>
+  <h2>放在同一張表裡比</h2>
+  <div class="btns" id="cmpBtns" role="group" aria-label="選擇比較表" style="margin:8px 0 16px"></div>
+  <div class="body cols wide-left">
+    <div class="bars" id="cmpBars"></div>
+    <div class="card" id="cmpNote" style="font-size:18px;line-height:1.6"></div>
+  </div>
+  <p class="src" id="cmpSrc">出處：Voxel R-CNN Table 5；LION Table 1；CasA Table III → wiki/comparisons/ · 事實 F43、F46、F47、F51</p>
+</section>
+
+<!-- 18 -->
+<section class="slide" data-title="總結">
+  <div class="kicker">總結</div>
+  <h2>一張圖記住：每一步都在問「哪裡在浪費？」</h2>
+  <div class="body cols c3" style="margin-top:16px">
+    <div class="card"><h3><span class="tag o">表示法</span></h3><ul>
+      <li>SECOND：空白不算</li><li>PointPillars：高度不算</li><li>NV3D：多餘的地面不算</li></ul></div>
+    <div class="card"><h3><span class="tag">精修</span></h3><ul>
+      <li>PV-RCNN：用 point 精修</li><li>Voxel R-CNN：voxel 就夠，快 3 倍</li><li>CasA：精修三次，救回遠處</li></ul></div>
+    <div class="card"><h3><span class="tag g">架構</span></h3><ul>
+      <li>VoxelNeXt：連 head 都 sparse</li><li>LION：用 linear RNN 看得更遠</li><li>兩者都提醒：FLOPs ≠ 速度</li></ul></div>
+  </div>
+  <div class="callout" style="margin-top:20px">精度路線多在 <b>KITTI</b> 上比，效率與新架構路線多在 <b>Waymo / nuScenes</b> 上比——兩邊的數字<b>不能互相比較</b>。</div>
+  <p class="src">整理自 wiki/comparisons/speed-vs-accuracy.md、waymo-same-table.md</p>
+</section>
+
+<!-- 19 -->
+<section class="slide" data-title="讀論文的注意事項">
+  <div class="kicker">帶得走的技能</div>
+  <h2>讀論文數字時，先問這四個問題</h2>
+  <div class="body cols">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card"><b>1. val 還是 test？</b> SECOND Car Mod.：val 76.48，test 73.66</div>
+      <div class="card"><b>2. R11 還是 R40？</b> 同一個 SECOND test：R11 73.66，R40 72.55</div>
+      <div class="card"><b>3.「mAP」是什麼的平均？</b> NV3D 宣稱 Car「86.60% mAP」＝三個難度的平均；慣用的 Moderate 只有 84.78</div>
+      <div class="card"><b>4. FLOPs 還是實際延遲？</b> VoxelNeXt FLOPs 約 1/5，延遲 66 vs 96 ms</div>
+    </div>
+    <div class="callout w" style="align-self:start">
+      <b>本專案建 Wiki 時實際遇到的問題</b>
+      <ul style="margin-top:6px">
+        <li>同一個方法，在不同論文的表裡數字不同</li>
+        <li>論文內文和表格互相矛盾</li>
+        <li>表格寫 val，內容卻是 test 的數字</li>
+        <li>GitHub README 的數字 ≠ 論文</li>
+      </ul>
+      <p style="margin:10px 0 0;font-size:18px">對策：<b>只在同一張表裡比大小</b>，每個數字標出處。</p>
+    </div>
+  </div>
+  <p class="src">出處：SECOND Table 2 / 4；PV-RCNN Table 1；NV3D Table 1 / 4；VoxelNeXt §5 → wiki/concepts/kitti-benchmark.md（注意事項 #1–#10）· 事實 F48–F50</p>
+</section>
+
+<!-- 20 -->
+<section class="slide" data-title="參考資料">
+  <div class="kicker">參考資料</div>
+  <h2>本簡報的知識來源</h2>
+  <div class="body cols">
+    <div>
+      <ol style="font-size:17px;line-height:1.55;padding-left:1.3em;margin:0">
+        <li>SECOND — Sensors 2018</li>
+        <li>PointPillars — CVPR 2019</li>
+        <li>PV-RCNN — CVPR 2020</li>
+        <li>Voxel R-CNN — AAAI 2021</li>
+        <li>CasA — IEEE TGRS 2022</li>
+        <li>VoxelNeXt — CVPR 2023</li>
+        <li>LION — arXiv 2024（預印本）</li>
+        <li>NV3D — arXiv 2025（預印本）</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h3>這份簡報怎麼來的</h3>
+      <div class="flow" style="gap:8px">
+        <span class="box">8 篇論文</span><span class="arr">→</span><span class="box">LLM Wiki（28 頁）</span><span class="arr">→</span><span class="box">事實清單（51 條）</span><span class="arr">→</span><span class="box hl">投影片</span>
+      </div>
+      <p style="margin-top:14px;font-size:17px">每一步都有自動檢查：事實的數字必須出現在 wiki；投影片的數字必須出現在事實清單。</p>
+      <p class="muted" style="font-size:15px;margin:0">檔案：raw/SOURCES.md · wiki/index.md · wiki/log.md · slides/facts.md · slides/check_facts.py</p>
+    </div>
+  </div>
+  <p class="src">發表資訊依 raw/SOURCES.md「發表資訊的查證」表</p>
+</section>
+
+</div></div>
+
+<div class="nav" aria-label="投影片導覽">
+  <button class="navbtn" id="prevBtn" aria-label="上一頁">←</button>
+  <button class="navbtn" id="themeBtn" aria-label="切換深淺色">◐</button>
+  <button class="navbtn" id="nextBtn" aria-label="下一頁">→</button>
+</div>
+
+<script>
+(function(){
+  const slides=[...document.querySelectorAll('.slide')];
+  const stage=document.getElementById('stage');
+  let cur=0;
+  slides.forEach((s,i)=>{const p=document.createElement('div');p.className='pager';p.textContent=(i+1)+' / '+slides.length;s.appendChild(p);});
+  function fit(){const s=Math.min(innerWidth/1300,innerHeight/740);stage.style.transform='scale('+s+')';}
+  function go(i){cur=Math.max(0,Math.min(slides.length-1,i));slides.forEach((s,k)=>s.classList.toggle('active',k===cur));
+    document.getElementById('progress').style.width=((cur+1)/slides.length*100)+'%';
+    if(location.hash!=='#'+(cur+1))history.replaceState(null,'','#'+(cur+1));
+    document.dispatchEvent(new CustomEvent('slide',{detail:cur}));}
+  addEventListener('resize',fit);fit();
+  addEventListener('keydown',e=>{if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();go(cur+1);}
+    else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();go(cur-1);}
+    else if(e.key==='Home')go(0);else if(e.key==='End')go(slides.length-1);});
+  document.getElementById('prevBtn').onclick=()=>go(cur-1);
+  document.getElementById('nextBtn').onclick=()=>go(cur+1);
+  let tx=null;addEventListener('touchstart',e=>{tx=e.touches[0].clientX},{passive:true});
+  addEventListener('touchend',e=>{if(tx===null)return;const dx=e.changedTouches[0].clientX-tx;if(Math.abs(dx)>50)go(cur+(dx<0?1:-1));tx=null;});
+  document.getElementById('themeBtn').onclick=()=>{const r=document.documentElement;const dark=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
+    r.dataset.theme=dark?'light':'dark';try{localStorage.setItem('deck-theme',r.dataset.theme)}catch(e){};drawVox();};
+  try{const t=localStorage.getItem('deck-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}
+  const h=parseInt(location.hash.slice(1));go(isNaN(h)?0:h-1);
+
+  const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  function bars(el,rows,max,min,dp){el.innerHTML='';min=min||0;rows.forEach(r=>{const d=document.createElement('div');d.className='bar'+(r.hl?' hl':'')+(r.dim?' dim':'');
+    const shown=(dp===undefined?String(r.v):r.v.toFixed(r.dp!==undefined?r.dp:dp));
+    d.innerHTML='<span class="k">'+r.k+'</span><span class="t"><span class="f" style="width:0"></span></span><span class="v">'+shown+(r.u||'')+'</span>';el.appendChild(d);
+    const f=d.querySelector('.f');void f.offsetWidth;f.style.width=Math.max(2,Math.min(100,(r.v-min)/(max-min)*100))+'%';});}
+
+  /* ---- 互動 1：格子大小（示意用合成點雲） ---- */
+  const cv=document.getElementById('voxCanvas'),ctx=cv.getContext('2d');
+  let rng=1234567;const rand=()=>{rng=(rng*16807)%2147483647;return rng/2147483647;};
+  const pts=[];const cars=[[150,120],[260,300],[420,180],[520,90],[560,320]];
+  for(let ring=1;ring<=22;ring++){const r=ring*ring*1.25+18;const n=Math.round(900/ring);
+    for(let k=0;k<n;k++){const a=-Math.PI/2.6+rand()*Math.PI/1.3;const x=r*Math.cos(a)*1.05+20,y=200+r*Math.sin(a)*0.62;if(x>0&&x<640&&y>0&&y<400)pts.push([x,y,0]);}}
+  cars.forEach(([cx,cy])=>{const dist=Math.hypot(cx-20,cy-200);const n=Math.round(5200/dist);
+    for(let k=0;k<n;k++){const e=rand();const x=cx+(e<.5?(rand()-.5)*34:-17+rand()*3),y=cy+(e<.5?-9+rand()*3:(rand()-.5)*18);pts.push([x,y,1]);}});
+  function drawVox(){const g=+document.getElementById('voxSize').value;const W=cv.width,H=cv.height;ctx.clearRect(0,0,W,H);
+    const occ=new Set();pts.forEach(p=>occ.add(Math.floor(p[0]/g)+','+Math.floor(p[1]/g)));
+    ctx.fillStyle=css('--accent');ctx.globalAlpha=.22;occ.forEach(k=>{const [i,j]=k.split(',').map(Number);ctx.fillRect(i*g,j*g,g,g);});
+    ctx.globalAlpha=.35;ctx.strokeStyle=css('--line');ctx.lineWidth=1;ctx.beginPath();
+    for(let x=0;x<=W;x+=g){ctx.moveTo(x+.5,0);ctx.lineTo(x+.5,H);}for(let y=0;y<=H;y+=g){ctx.moveTo(0,y+.5);ctx.lineTo(W,y+.5);}ctx.stroke();
+    ctx.globalAlpha=1;pts.forEach(p=>{ctx.fillStyle=p[2]?css('--accent2'):css('--muted');ctx.fillRect(p[0]-1,p[1]-1,2,2);});
+    ctx.fillStyle=css('--fg');ctx.beginPath();ctx.arc(20,200,6,0,7);ctx.fill();
+    const total=Math.ceil(W/g)*Math.ceil(H/g);
+    document.getElementById('voxReadout').textContent='格子 '+total.toLocaleString()+' 個 · 非空 '+Math.round(occ.size/total*100)+'%';}
+  document.getElementById('voxSize').addEventListener('input',drawVox);drawVox();
+
+  /* ---- PointPillars 速度條 ---- */
+  const speed=/*fact*/[{k:'VoxelNet',v:4.4},{k:'SECOND',v:20},{k:'PointPillars',v:62,hl:1}]/*end*/;
+  speed.forEach(r=>r.u=' Hz');
+  /* ---- CasA 元件 ---- */
+  const casa=/*fact*/[{k:'Voxel R-CNN',v:85.27,dim:1},{k:'+ 傳統 cascade',v:84.82,dim:1},{k:'+ Cascade Attention',v:85.72},{k:'+ Part-aided',v:85.85},{k:'+ Boxes voting',v:86.37,hl:1}]/*end*/;
+  /* ---- LION 消融 ---- */
+  const lion=/*fact*/[{k:'baseline',v:65.8,dim:1},{k:'+ 大群組',v:66.9},{k:'+ 3D SFD',v:68.6},{k:'+ Voxel Gen.',v:69.3,hl:1}]/*end*/;
+
+  /* ---- 互動 2：Voxel R-CNN 消融 ---- */
+  const abl=/*fact*/[
+    {id:'a',name:'(a) One-stage',ap:77.99,fps:40.8,note:'只用鳥瞰圖出框。<b>很快，但不夠準</b>：BEV 表示不足以精確預測 3D 框。'},
+    {id:'b',name:'(b) + 精修頭',ap:84.21,fps:17.4,note:'加上第二階段：AP 大跳升。但用的是點雲式的 ball query 和原版 PointNet，<b>速度掉了一半以上</b>。'},
+    {id:'c',name:'(c) + Voxel Query',ap:84.33,fps:19.1,note:'voxel 排在規則格子上，用<b>索引加減</b>就能找到鄰居，不用掃描所有點。'},
+    {id:'d',name:'(d) + 加速 PointNet',ap:84.27,fps:21.4,note:'把全連接層拆成「特徵」和「座標」兩半，特徵那半在分組<b>之前</b>先算好。'},
+    {id:'e',name:'(e) Voxel R-CNN',ap:84.52,fps:25.2,note:'全部加上：<b>精度保留、速度拿回來</b>。關鍵是利用「voxel 是規則格子」這個特性。'}]/*end*/;
+  const ablBtns=document.getElementById('ablBtns');let ablI=0;
+  abl.forEach((s,i)=>{const b=document.createElement('button');b.className='chip';b.textContent=s.name;b.onclick=()=>{ablI=i;drawAbl();};ablBtns.appendChild(b);});
+  function drawAbl(){const s=abl[ablI];[...ablBtns.children].forEach((b,i)=>b.setAttribute('aria-pressed',i===ablI));
+    const el=document.getElementById('ablBars');el.innerHTML='';
+    bars(el,[{k:'AP（Car Mod.）',v:s.ap,dp:2}],90,70,2);const apRow=el.firstChild;
+    const tmp=document.createElement('div');bars(tmp,[{k:'速度',v:s.fps,u:' FPS',hl:1,dp:1}],45,0,1);el.appendChild(apRow);el.appendChild(tmp.firstChild);
+    document.getElementById('ablTable').innerHTML='<tr><th>步驟</th><th class="num">AP</th><th class="num">FPS</th></tr>'+abl.map((x,i)=>'<tr'+(i===ablI?' class="hl"':'')+'><td>'+x.name+'</td><td class="num">'+x.ap.toFixed(2)+'</td><td class="num">'+x.fps.toFixed(1)+'</td></tr>').join('');
+    document.getElementById('ablNote').innerHTML='<h3>'+s.name+'</h3><p style="margin:0">'+s.note+'</p><p class="muted" style="font-size:14px;margin:12px 0 0">AP 條的範圍為 70–90，速度條為 0–45 FPS。</p>';}
+  drawAbl();
+
+  /* ---- 互動 3：同表比較 ---- */
+  const cmp=/*fact*/{
+    kitti:{dp:2,label:'KITTI val R11 · Car Mod.',src:'出處：Voxel R-CNN Table 5 → wiki/comparisons/speed-vs-accuracy.md · 事實 F46',min:60,max:90,
+      rows:[{k:'VoxelNet',v:65.46,dim:1},{k:'PointPillars',v:76.06},{k:'SECOND',v:78.62},{k:'PointRCNN',v:78.63},{k:'STD',v:79.80},{k:'SA-SSD',v:79.91},{k:'PV-RCNN',v:83.69},{k:'Voxel R-CNN',v:84.52,hl:1}],
+      note:'<b>精度路線</b>：two-stage 精修（PV-RCNN、Voxel R-CNN）明顯領先 one-stage。<br><span class="muted">CasA、NV3D 不在這張表 → 請切到「CasA Table III」。</span>'},
+    casa:{dp:2,label:'CasA Table III · val R11 Car Mod.',src:'出處：CasA Table III → wiki/comparisons/speed-vs-accuracy.md · 事實 F47',min:80,max:88,
+      rows:[{k:'PV-RCNN',v:83.90,dim:1},{k:'+ CasA',v:86.17,hl:1},{k:'Voxel R-CNN',v:84.52,dim:1},{k:'+ CasA',v:86.58,hl:1},{k:'CT3D',v:86.06,dim:1},{k:'+ CasA',v:86.63,hl:1}],
+      note:'CasA 可以接在<b>任何 two-stage 偵測器</b>上，三種都進步。<br>base 越強（CT3D），進步越小。'},
+    waymo:{dp:1,label:'Waymo val · L2 mAPH',src:'出處：LION Table 1 → wiki/comparisons/waymo-same-table.md · 事實 F43、F51',min:50,max:78,
+      rows:[{k:'SECOND',v:57.2,dim:1},{k:'PointPillars',v:57.8,dim:1},{k:'CenterPoint',v:65.8},{k:'PV-RCNN',v:67.2},{k:'PV-RCNN++',v:69.5},{k:'VoxelNeXt',v:70.1},{k:'FSD',v:70.8},{k:'DSVT-Voxel',v:72.1},{k:'LION-Mamba',v:73.2,hl:1},{k:'HEDNet',v:73.4},{k:'LION-Mamba-L',v:74.0,hl:1}],
+      note:'<b>效率與新架構路線</b>：fully sparse、Transformer、linear RNN 依序往上。<br>但注意 <b>HEDNet（sparse conv）</b>仍高於 LION-Mamba——舊架構沒有被淘汰。'}}/*end*/;
+  const cmpBtns=document.getElementById('cmpBtns');let cmpK='kitti';
+  [['kitti','KITTI（精度路線）'],['casa','CasA Table III'],['waymo','Waymo（新架構）']].forEach(([k,t])=>{const b=document.createElement('button');b.className='chip';b.textContent=t;b.dataset.k=k;b.onclick=()=>{cmpK=k;drawCmp();};cmpBtns.appendChild(b);});
+  function drawCmp(){const c=cmp[cmpK];[...cmpBtns.children].forEach(b=>b.setAttribute('aria-pressed',b.dataset.k===cmpK));
+    bars(document.getElementById('cmpBars'),c.rows,c.max,c.min,c.dp);
+    document.getElementById('cmpNote').innerHTML='<h3>'+c.label+'</h3><p style="margin:0">'+c.note+'</p><p class="muted" style="font-size:14px;margin:12px 0 0">長條從 '+c.min+' 開始畫，只為放大差異。</p>';
+    document.getElementById('cmpSrc').textContent=c.src;}
+  drawCmp();
+
+  document.addEventListener('slide',e=>{const s=slides[e.detail];
+    if(s.querySelector('#speedBars'))bars(document.getElementById('speedBars'),speed,70);
+    if(s.querySelector('#casaBars'))bars(document.getElementById('casaBars'),casa,87,83,2);
+    if(s.querySelector('#lionBars'))bars(document.getElementById('lionBars'),lion,70,64,1);
+    if(s.querySelector('#ablBars'))drawAbl();if(s.querySelector('#cmpBars'))drawCmp();if(s.querySelector('#voxCanvas'))drawVox();});
+  go(cur);
+})();
+</script>
+</body>
+</html>
