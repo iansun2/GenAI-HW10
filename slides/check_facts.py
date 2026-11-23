@@ -1,7 +1,7 @@
 """兩階段檢查：
 1. facts.md 的每個數字都必須出現在它標示的 wiki 頁（事實 ← wiki）。
 2. index.html 中每個帶小數點的數字、以及 data-fact 標註的數字，都必須出現在 facts.md（簡報 ← 事實）。
-用法：python3 slides/check_facts.py [--html slides/index.html]
+用法：python3 slides/check_facts.py [--html index.html]
 """
 import re, sys, os, html
 
