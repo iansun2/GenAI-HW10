@@ -134,3 +134,9 @@
 
 ## [2026-11-23] move | 簡報移到根目錄
 - slides/index.html → index.html（GitHub Pages 無法從 slides/ 子目錄發布）。事實清單與 checker 仍在 slides/。
+
+## [2026-11-23] update | CLAUDE.md 對齊目前流程
+- Ingest 流程新增第 0 步（表格數字檢查、發表資訊以 raw 為準）；原本只寫在寫作規則中。
+- raw 唯讀規則補上例外：`raw/SOURCES.md` 可更正出處資訊並記入 log（先前更正過 LION 發表資訊、註明 CasA PDF 未上傳）。
+- Lint：程式從暫存區移到 `tools/lint.py`，新增「過時標記」檢查（唯一結果為 nuScenes mAP 配對方式，維持待補）。
+- 新增「簡報產生流程」一節與 slides/、index.html 的目錄說明。
